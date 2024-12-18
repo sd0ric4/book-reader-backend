@@ -1,0 +1,17 @@
+mysql:
+  dbname: test
+  host: mysql
+  port: 3306
+  user: root
+  password: root
+
+redis:
+  host: redis
+  port: 6379
+
+server:
+  port: 8080
+
+jwt:
+  secret: secret
+  expire: 3600

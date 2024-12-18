@@ -1,0 +1,16 @@
+#Go build files
+bin/
+*.exe
+*.test
+*.out
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Configuration
+config/config.yaml
+
+# IDEs
+.vscode/
+.idea/
