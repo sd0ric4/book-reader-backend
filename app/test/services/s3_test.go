@@ -66,6 +66,7 @@ func TestDownloadFile(t *testing.T) {
 }
 
 func TestGetFileURL(t *testing.T) {
+	t.Parallel()
 	config.LoadConfig("../../../config/config.yaml")
 
 	client, err := services.NewMinioClient(config.Config.S3)
