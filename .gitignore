@@ -14,3 +14,5 @@ config/config.yaml
 # IDEs
 .vscode/
 .idea/
+
+log.txt
