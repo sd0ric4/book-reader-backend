@@ -56,3 +56,31 @@ CREATE TABLE IF NOT EXISTS favorite_books (
     INDEX (user_id),
     INDEX (book_id)
 );
+
+-- 评论表
+CREATE TABLE IF NOT EXISTS reviews (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED,
+    book_id BIGINT UNSIGNED,
+    review_data JSON NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (book_id) REFERENCES books(id),
+    INDEX (user_id),
+    INDEX (book_id)
+);
+
+-- epub章节结构表
+CREATE TABLE IF NOT EXISTS book_chapters (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    book_id BIGINT UNSIGNED NOT NULL,
+    chapter_structure JSON NOT NULL COMMENT 'epub提取的章节结构json',
+    chapter_name VARCHAR(255) NOT NULL COMMENT '章节名称',
+    chapter_content TEXT COMMENT '章节的纯文本内容',
+    content_path VARCHAR(255) COMMENT '可选:如果内容较大存文件，这里存储文件路径',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (book_id) REFERENCES books(id),
+    INDEX (book_id)
+);

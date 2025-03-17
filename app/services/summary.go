@@ -10,6 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	openai "github.com/sashabaranov/go-openai"
+	"github.com/sd0ric4/book-reader-backend/app/database"
+	"github.com/sd0ric4/book-reader-backend/app/models"
 )
 
 type AiConfig struct {
@@ -91,70 +93,131 @@ func NewOpenAIClient(apiKey string, options ...ClientOption) *openai.Client {
 	return openai.NewClientWithConfig(config)
 }
 
+// 添加新的验证函数
+func isValidBookReview(data map[string]interface{}) bool {
+	// 检查必要字段是否存在且不为空
+	if title, ok := data["title"].(string); !ok || title == "" {
+		return false
+	}
+	if author, ok := data["author"].(string); !ok || author == "" {
+		return false
+	}
+	if synopsis, ok := data["synopsis"].(string); !ok || synopsis == "" {
+		return false
+	}
+
+	// 检查characters数组
+	characters, ok := data["characters"].([]interface{})
+	if !ok || len(characters) == 0 {
+		return false
+	}
+
+	// 检查每个character的完整性
+	for _, char := range characters {
+		character, ok := char.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		if name, ok := character["name"].(string); !ok || name == "" || name == "人物1" || name == "人物2" {
+			return false
+		}
+		if role, ok := character["role"].(string); !ok || role == "" {
+			return false
+		}
+	}
+
+	return true
+}
+
+// 修改 GetBookSummary 函数
 func GetBookSummary(c *gin.Context) {
-	API_KEY := aiconfig.APIKey
-	BASE_URL := aiconfig.BaseURL
-	MODEL_NAME := aiconfig.ModelName
 	var requestData RequestData
 	if err := c.ShouldBindJSON(&requestData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 准备提示词
-	prompt := fmt.Sprintf(
-		PROMPT_TEMPLATE,
-		requestData.BookTitle,
-		requestData.Author,
-		requestData.Author,
-		requestData.BookTitle,
-	)
+	// 先从数据库查询
+	db := database.MySQLDB
+	review, err := models.GetReviewByTitle(db, requestData.BookTitle)
 
-	// 创建 OpenAI 客户端，允许自定义 BaseURL
-	client := NewOpenAIClient(
-		API_KEY,
-		WithBaseURL(BASE_URL),
-	)
-
-	// 准备 ChatCompletion 请求
-	resp, err := client.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model: MODEL_NAME,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: prompt,
-				},
-			},
-			MaxTokens:   500, // 根据需要调整
-			Temperature: 0.7, // 控制随机性
-		},
-	)
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("API 调用失败: %v", err),
-		})
+	// 如果数据库中存在且数据有效，直接返回
+	if err == nil && review != nil && len(review.ReviewData.Items) > 0 {
+		c.JSON(http.StatusOK, gin.H{"summary": review.ReviewData.Items[0]})
 		return
 	}
 
-	// 检查响应
-	if len(resp.Choices) > 0 {
-		summary := resp.Choices[0].Message.Content
-		// 将summary中的json提取出来
-		jsonData, err := extractJSON(summary)
+	// 最大重试次数
+	maxRetries := 3
+	var jsonData map[string]interface{}
+
+	for i := 0; i < maxRetries; i++ {
+		// AI 调用逻辑
+		client := NewOpenAIClient(aiconfig.APIKey, WithBaseURL(aiconfig.BaseURL))
+		resp, err := client.CreateChatCompletion(
+			context.Background(),
+			openai.ChatCompletionRequest{
+				Model: aiconfig.ModelName,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role:    openai.ChatMessageRoleUser,
+						Content: fmt.Sprintf(PROMPT_TEMPLATE, requestData.BookTitle, requestData.Author, requestData.Author, requestData.BookTitle),
+					},
+				},
+				MaxTokens:   500,
+				Temperature: 0.7,
+			},
+		)
+
 		if err != nil {
-			fmt.Println("Error:", err)
-			return
+			continue
 		}
-		// 返回提取的json数据
-		c.JSON(http.StatusOK, gin.H{"summary": jsonData})
-	} else {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "未能获取书籍摘要",
-		})
+
+		if len(resp.Choices) > 0 {
+			jsonData, err = extractJSON(resp.Choices[0].Message.Content)
+			if err != nil {
+				continue
+			}
+
+			// 验证数据完整性
+			if isValidBookReview(jsonData) {
+				characters := make([]models.Character, 0)
+				// 从 jsonData["characters"] 中提取数据并填充 characters 切片
+
+				for _, char := range jsonData["characters"].([]interface{}) {
+					character := char.(map[string]interface{})
+					characters = append(characters, models.Character{
+						Name: character["name"].(string),
+						Role: character["role"].(string),
+					})
+				}
+				reviewData := []models.BookReviewData{{
+					Title:      requestData.BookTitle,
+					Author:     requestData.Author,
+					Characters: characters,
+					Synopsis:   jsonData["synopsis"].(string),
+				}}
+
+				newReview := &models.Review{
+					BookID: 41,
+					UserID: 999,
+					ReviewData: models.BookReviewDataList{
+						Items: reviewData,
+					},
+				}
+
+				if err := models.CreateReview(db, newReview); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "保存到数据库失败"})
+					return
+				}
+
+				c.JSON(http.StatusOK, gin.H{"summary": jsonData})
+				return
+			}
+		}
 	}
+
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "无法获取有效的书籍摘要"})
 }
 
 func extractJSON(summary string) (map[string]interface{}, error) {
