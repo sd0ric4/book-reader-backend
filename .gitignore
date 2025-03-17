@@ -10,7 +10,7 @@ docker-compose.override.yml
 
 # Configuration
 config/config.yaml
-
+config/book.txt
 # IDEs
 .vscode/
 .idea/
